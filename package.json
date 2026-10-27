@@ -1,0 +1,14 @@
+{
+  "name": "csv-reader",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Fast CSV viewer",
+  "scripts": {
+    "sync": "cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.2.2",
+    "@capacitor/cli": "^6.2.2",
+    "@capacitor/core": "^6.2.2"
+  }
+}

@@ -1,0 +1,632 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#181818">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="CSV Reader">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<title>CSV Reader</title>
+<style>
+  :root {
+    --bg: #181818; --bg-cell: #1e1e1e; --bg-header: #14148c; --grid: #4a4a4a;
+    --separator: #9a9a9a; --text: #f0f0f0;
+    --match-cell: #8b008b; --row-match: #3a1f45; --sel: #2f4f7f;
+    --row-h: 30px; --font-size: 13px; --pad: 3px; --handle-w: 6px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif; font-size: var(--font-size); }
+  button { font: inherit; cursor: pointer; }
+
+  /* ---- start screen ---- */
+  #start { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 14px; color: #9a9a9a; }
+  #start .big { padding: 10px 22px; border: 0; border-radius: 6px; background: #3b6fd4; color: #fff; font-size: 15px; }
+  #start.drag { outline: 3px dashed #3b6fd4; outline-offset: -12px; }
+
+  /* ---- table ---- */
+  #scroller { overscroll-behavior: contain; position: fixed; inset: 0; overflow: auto; display: none; background: var(--bg-cell); }
+  #inner { position: relative; }
+  #head { position: sticky; top: 0; z-index: 5; display: flex; height: var(--row-h); background: var(--bg-header); }
+  #rows { position: absolute; left: 0; top: var(--row-h); }
+  .hc { display: flex; align-items: center; flex: none; height: var(--row-h); background: var(--bg-header);
+    border-right: 1px solid var(--grid); border-bottom: 1px solid var(--grid); color: #fff; font-weight: 700;
+    padding-left: var(--pad); user-select: none; }
+  .hc .ht { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hc.n .ht { text-align: right; padding-right: 0; }
+  .hc.n .rs { width: var(--handle-n); }
+  .hc .rs { flex: none; width: var(--handle-w); align-self: stretch; cursor: col-resize; touch-action: none; }
+  .hc .rs:hover { background: rgba(255,255,255,.25); }
+  .r { position: absolute; left: 0; display: flex; height: var(--row-h); background: var(--bg-cell); }
+  .r.hit { background: var(--row-match); }
+  .r.sel { background: var(--sel); }
+  .c { flex: none; height: var(--row-h); line-height: calc(var(--row-h) - 1px); padding: 0 var(--pad);
+    border-right: 1px solid var(--grid); border-bottom: 1px solid var(--grid);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: inherit; }
+  .c.n { text-align: right; font-variant-numeric: tabular-nums; }
+  .c.m { background-color: var(--match-cell); color: #fff; font-weight: 700; }
+  /* selected (sorted) column */
+  .c.cs { background-image: linear-gradient(rgba(90,150,255,.17), rgba(90,150,255,.17)); }
+  .hc:not(.f) { position: relative; }
+  .hc .ht { cursor: pointer; }
+  .hc.sel { background: #2733b8; }
+  .hc.sel::after { content: '▼'; position: absolute; left: 1px; top: 0; font-size: 8px; line-height: 10px;
+    color: #b9d0ff; pointer-events: none; }
+  .hc.sel.asc::after { content: '▲'; }
+  .f { position: sticky; left: 0; z-index: 2; border-right: 2px solid var(--separator); }
+  .hc.f { z-index: 6; }
+
+  /* ---- tabs ---- */
+  :root { --tab-h: 36px; }
+  #tabs { position: fixed; top: 0; left: 0; right: 0; height: var(--tab-h); z-index: 25; display: none;
+    background: #101010; border-bottom: 1px solid #333; overflow-x: auto; overflow-y: hidden; white-space: nowrap;
+    scrollbar-width: none; }
+  #tabs::-webkit-scrollbar { display: none; }
+  body.tabs #tabs { display: flex; }
+  /* the tab bar sits above the table's first row: visible at the very top, slides away once scrolled down */
+  body.tabs #inner { margin-top: var(--tab-h); }
+  body.tabs #bar { top: calc(var(--tab-h) + 6px); }
+  #tabs { transition: transform .15s ease; }
+  body.th #tabs { transform: translateY(-100%); pointer-events: none; }
+  body.th #bar { top: 6px; }
+  /* while the tab bar is showing over a scrolled table, keep the column header just below it */
+  body.tabs:not(.th) #head { top: var(--tab-h); }
+  .tab { flex: none; display: flex; align-items: center; gap: 6px; max-width: 190px; padding: 0 6px 0 12px; cursor: pointer;
+    color: #a0a0a0; border-right: 1px solid #262626; user-select: none; -webkit-user-select: none; }
+  .tab:hover { background: #1a1a1a; }
+  .tab.on { background: #1e1e1e; color: #fff; box-shadow: inset 0 -2px 0 #3b6fd4; }
+  .tab .tn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tab .x { flex: none; width: 22px; height: 22px; line-height: 21px; text-align: center; border-radius: 4px; font-style: normal; font-size: 16px; color: #888; }
+  .tab .x:hover { background: #3a3a3a; color: #fff; }
+  #addTab { flex: none; width: 40px; border: 0; background: transparent; color: #9ab6f0; font-size: 22px; cursor: pointer; }
+  #addTab:hover { background: #1a1a1a; }
+
+  /* ---- floating search ---- */
+  #bar { position: fixed; top: 6px; left: 6px; right: 6px; z-index: 20; display: none; align-items: center;
+    gap: 6px; padding: 5px 8px; background: #262626; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,.6); }
+  #bar.show { display: flex; }
+  #status { color: #9a9a9a; font-size: 12px; white-space: nowrap; }
+  #q { flex: 1; min-width: 120px; padding: 6px 8px; background: #1a1a1a; color: var(--text);
+    border: 1px solid #555; border-radius: 4px; font: inherit; }
+  #q:focus { outline: 2px solid #3b6fd4; border-color: transparent; }
+  #bar button { background: #333; color: #ddd; border: 0; border-radius: 4px; padding: 6px 10px; }
+  #bar button:hover { background: #444; }
+  #bar label { color: #ccc; font-size: 12px; white-space: nowrap; display: flex; align-items: center; gap: 4px; }
+  #fab { position: fixed; right: calc(18px + env(safe-area-inset-right)); bottom: calc(18px + env(safe-area-inset-bottom)); z-index: 15; width: 52px; height: 52px; border-radius: 50%;
+    border: 0; background: #1f7a4d; color: #fff; font-size: 22px; box-shadow: 0 2px 10px rgba(0,0,0,.6); display: none; }
+  #loading { position: fixed; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center;
+    background: rgba(24,24,24,.85); color: #bbb; font-size: 16px; }
+  /* ---- phone ---- */
+  #bar { flex-wrap: wrap; padding-top: calc(5px + env(safe-area-inset-top)); }
+  @media (max-width: 700px) { #q { flex: 1 1 100%; order: -1; } }
+  @media (pointer: coarse) {
+    .r, .hc { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+    .hc .rs { touch-action: none; }
+    #bar button { padding: 9px 14px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="start">
+  <div>Please select a CSV file to view its contents. <span style="font-size:11px;opacity:.6">(v2-tabs-on-scroll-up)</span></div>
+  <button class="big" id="openBtn">Select CSV Files</button>
+  <div style="font-size:12px">You can select several files at once; each opens in its own tab. Or drop .csv files anywhere on this window.</div>
+</div>
+
+<div id="tabs"></div>
+<div id="scroller"><div id="inner"><div id="head"></div><div id="rows"></div></div></div>
+
+<div id="bar">
+  <span id="status"></span>
+  <input id="q" type="text" enterkeyhint="search" placeholder="Search all columns (Enter = next match, Shift+Enter = previous)" autocomplete="off">
+  <button id="prev" title="Previous match">▲</button>
+  <button id="next" title="Next match">▼</button>
+  <button id="clear" title="Clear search">✕</button>
+  <label><input type="checkbox" id="only"> Matches only</label>
+  <button id="openOther" title="Open more CSV files">📂</button>
+  <button id="closeBar" title="Hide (Esc)">–</button>
+</div>
+<button id="fab" title="Search (Ctrl+F)">🔍</button>
+<div id="loading">Loading…</div>
+<input type="file" id="file" accept=".csv,text/csv,text/plain" multiple hidden>
+
+<script>
+(() => {
+'use strict';
+
+/* ======================= SETTINGS (tune here) ======================= */
+const CFG = {
+  FONT: '"Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif',
+  FONT_SIZE: 13,
+  ROW_H: 30,
+  PAD: 3,                    // left/right padding inside a cell
+  HANDLE_W: matchMedia('(pointer:coarse)').matches ? 14 : 6,   // header resize handle width (wider for fingers)
+  MIN_COL_W: 36,
+  MAX_COL_W: 1000,
+  INIT_MAX_COL_W: 150,       // cap for the automatic initial width of a column
+  EXTRA_COL_W: 2,            // slack added to every column
+  NARROW_CAPS: { company_name: 120, sector: 90, industry: 110 },   // per-column caps (header name, lower case)
+  COMPACT_FROM_HEADER: 'pe_ratio',   // from this column to the last one: smaller header font, no slack
+  COMPACT_HEADER_FONT_SIZE: 11,
+  COMPACT_EXTRA_W: 0,
+  CONTEXT_ROWS: 3,           // rows shown above a match when jumping to it
+  BUFFER_ROWS: 20,           // extra rows rendered above/below the screen
+  NUM_HEADER_FONT_SIZE: 11,  // header font of number columns (smaller = narrower column)
+  NUM_HANDLE_W: matchMedia('(pointer:coarse)').matches ? 10 : 4,   // resize handle width in number columns
+  MIN_NUM_COL_W: 20,
+  TAB_H: 36,                 // height of the file-tab bar (must match --tab-h in the CSS)
+  NUMERIC_HEADER_HINTS: ['market_cap', 'market cap', 'marketcap'],
+};
+/* ==================================================================== */
+
+const $ = id => document.getElementById(id);
+const scroller = $('scroller'), inner = $('inner'), headEl = $('head'), rowsEl = $('rows');
+const bar = $('bar'), qEl = $('q'), statusEl = $('status'), fab = $('fab');
+const ROW_H = CFG.ROW_H, HEAD_H = CFG.ROW_H;
+const root = document.documentElement.style;
+root.setProperty('--row-h', ROW_H + 'px');
+root.setProperty('--font-size', CFG.FONT_SIZE + 'px');
+root.setProperty('--pad', CFG.PAD + 'px');
+root.setProperty('--handle-w', CFG.HANDLE_W + 'px');
+root.setProperty('--handle-n', CFG.NUM_HANDLE_W + 'px');
+root.setProperty('--tab-h', CFG.TAB_H + 'px');
+const topOff = () => document.body.classList.contains('tabs') ? CFG.TAB_H : 0;   // space above the header row
+// tab bar: hidden while scrolling down, shown again as soon as you scroll up (and at the very top)
+let lastTop = 0;
+const syncTabs = () => {
+  const t = scroller.scrollTop, b = document.body.classList;
+  if (t <= 4) { b.remove('th'); lastTop = t; return; }
+  const d = t - lastTop;
+  if (d > 6) { b.add('th'); lastTop = t; }
+  else if (d < -6) { b.remove('th'); lastTop = t; }
+};
+const scrollFor = v => v <= 0 ? 0 : topOff() + v * ROW_H;   // scrollTop that puts view row v just under the header
+
+// ---- state ----
+let headers = [], rows = [], lower = [];
+let W = [], numeric = [], compactStart = 0, cands = [];
+let N = 0;                       // number of displayed rows (all rows, or matches only)
+let view = null;                 // null = all rows, otherwise array of original row indices
+let sel = -1;                    // selected original row index
+let matches = [], matchPos = -1, lastQuery = '';
+let rStart = -1, rEnd = -2;      // currently rendered range (view positions)
+let sortCol = -1, sortDir = 0;   // selected (sorted) column; 1 = A-Z / smallest first, -1 = largest first
+let order = null, rank = null;   // sorted original row indices, and each row's position in that order
+let tabs = [], cur = -1;         // open files (one tab each) and the active tab
+
+// ---- text measuring (canvas) ----
+// Measure with a real (hidden) element, so the result matches what the screen draws,
+// including the phone's own font-size / text-zoom setting (canvas measuring does not).
+const measEl = document.createElement('span');
+measEl.style.cssText = 'position:absolute;left:-9999px;top:0;visibility:hidden;white-space:pre;';
+document.body.appendChild(measEl);
+const measure = (txt, size, bold, num) => {
+  measEl.style.fontVariantNumeric = num ? 'tabular-nums' : 'normal';
+  measEl.style.fontSize = size + 'px';
+  measEl.style.fontWeight = bold ? '700' : '400';
+  measEl.textContent = txt;
+  return measEl.getBoundingClientRect().width;
+};
+
+// ---- CSV parsing / decoding ----
+function decode(buf) {
+  let t;
+  try { t = new TextDecoder('utf-8', { fatal: true }).decode(buf); }
+  catch { t = new TextDecoder('windows-1252').decode(buf); }
+  return t.charCodeAt(0) === 0xFEFF ? t.slice(1) : t;
+}
+function parseCSV(t) {
+  const out = []; let row = []; let i = 0; const n = t.length;
+  while (i < n) {
+    let field;
+    if (t.charCodeAt(i) === 34) {                       // quoted field
+      i++; field = '';
+      for (;;) {
+        const q = t.indexOf('"', i);
+        if (q < 0) { field += t.slice(i); i = n; break; }
+        field += t.slice(i, q);
+        if (t.charCodeAt(q + 1) === 34) { field += '"'; i = q + 2; } else { i = q + 1; break; }
+      }
+      while (i < n) { const c = t.charCodeAt(i); if (c === 44 || c === 10 || c === 13) break; field += t[i++]; }
+    } else {
+      let j = i;
+      while (j < n) { const c = t.charCodeAt(j); if (c === 44 || c === 10 || c === 13) break; j++; }
+      field = t.slice(i, j); i = j;
+    }
+    row.push(field);
+    const c = t.charCodeAt(i);
+    if (c === 44) { i++; if (i >= n) row.push(''); continue; }
+    if (c === 13 && t.charCodeAt(i + 1) === 10) i += 2; else if (i < n) i++;
+    out.push(row); row = [];
+  }
+  if (row.length) out.push(row);
+  return out.filter(r => !(r.length === 1 && r[0] === ''));
+}
+
+const NUM_RE = /^\(?[-+]?[$€£]?\s?(\d[\d,]*\.?\d*|\.\d+)([eE][-+]?\d+)?\s?(%|k|m|b|t|mn|bn|tn|thousand|million|billion|trillion)?\)?$/i;
+const isNum = s => NUM_RE.test(s.trim());
+
+// ---- column sizing ----
+function analyse() {
+  const nc = headers.length;
+  cands = Array.from({ length: nc }, () => []);       // the 3 longest distinct-length strings per column
+  for (const r of rows) {
+    for (let j = 0; j < nc; j++) {
+      const s = r[j]; if (!s) continue;
+      const c = cands[j];
+      if (c.length < 3) { c.push(s); if (c.length === 3) c.sort((a, b) => a.length - b.length); }
+      else if (s.length > c[0].length) { c[0] = s; c.sort((a, b) => a.length - b.length); }
+    }
+  }
+  const hl = headers.map(h => h.trim().toLowerCase());
+  const k = hl.indexOf(CFG.COMPACT_FROM_HEADER);
+  compactStart = k >= 0 ? k : nc;
+  numeric = headers.map((h, j) => {
+    if (CFG.NUMERIC_HEADER_HINTS.some(x => hl[j].includes(x))) return true;
+    let tot = 0, hit = 0;
+    for (let i = 0; i < rows.length && tot < 2000; i++) {
+      const s = (rows[i][j] || '').trim(); if (!s) continue;
+      tot++; if (isNum(s)) hit++;
+    }
+    return tot > 0 && hit >= 0.8 * tot;
+  });
+  W = headers.map((_, j) => colWidth(j, false));
+}
+function headFont(j) { return numeric[j] ? CFG.NUM_HEADER_FONT_SIZE : j >= compactStart ? CFG.COMPACT_HEADER_FONT_SIZE : CFG.FONT_SIZE; }
+function colWidth(j, fitAll) {
+  if (numeric[j]) {          // number column: just as wide as its widest number, but never narrower than its header
+    let nw = 0;
+    for (const s of cands[j]) nw = Math.max(nw, measure(s, CFG.FONT_SIZE, false, true));
+    const hw = measure(headers[j], CFG.NUM_HEADER_FONT_SIZE, true);
+    const w = Math.max(nw + 2 * CFG.PAD + 1, hw + CFG.PAD + CFG.NUM_HANDLE_W + 1) + 1;
+    return Math.ceil(Math.max(CFG.MIN_NUM_COL_W, Math.min(CFG.MAX_COL_W, w)));
+  }
+  const compact = j >= compactStart;
+  const extra = compact ? CFG.COMPACT_EXTRA_W : CFG.EXTRA_COL_W;
+  let dataW = 0;
+  for (const s of cands[j]) dataW = Math.max(dataW, measure(s, CFG.FONT_SIZE, false));
+  const headW = measure(headers[j], headFont(j), true);
+  let w = Math.max(dataW + 2 * CFG.PAD + 1, headW + 2 * CFG.PAD + CFG.HANDLE_W + 1 + 4) + extra + 1;
+  const cap = fitAll ? CFG.MAX_COL_W : (CFG.NARROW_CAPS[headers[j].trim().toLowerCase()] ?? CFG.INIT_MAX_COL_W);
+  return Math.round(Math.max(CFG.MIN_COL_W, Math.min(cap, w)));
+}
+
+// ---- rendering ----
+const esc = s => s.replace(/[&<>"]/g, c => c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&quot;');
+function buildHeader() {
+  headEl.innerHTML = headers.map((h, j) =>
+    `<div class="hc${numeric[j] ? ' n' : ''}${j === 0 ? ' f' : ''}${j === sortCol ? ' sel' + (sortDir > 0 ? ' asc' : '') : ''}" data-j="${j}" style="width:${W[j]}px;font-size:${headFont(j)}px" title="${esc(h)}">` +
+    `<span class="ht">${esc(h)}</span><i class="rs" data-j="${j}"></i></div>`).join('');
+}
+function setSizes() {
+  const total = W.reduce((a, b) => a + b, 0);
+  inner.style.width = total + 'px';
+  inner.style.height = (HEAD_H + N * ROW_H) + 'px';
+  headEl.style.width = total + 'px';
+  rowsEl.style.width = total + 'px';
+}
+function renderRows(force) {
+  if (!headers.length) return;
+  const st = scroller.scrollTop, vh = scroller.clientHeight;
+  const first = Math.max(0, Math.floor((st - topOff()) / ROW_H));
+  const last = Math.min(N - 1, first + Math.ceil((vh - HEAD_H) / ROW_H) + 1);
+  const B = CFG.BUFFER_ROWS;
+  if (!force && rStart >= 0 &&
+      !(first < rStart + B / 2 && rStart > 0) && !(last > rEnd - B / 2 && rEnd < N - 1)) return;
+  const s = Math.max(0, first - B), e = Math.min(N - 1, last + B);
+  const q = lastQuery, nc = headers.length;
+  let html = '';
+  for (let v = s; v <= e; v++) {
+    const i = view ? view[v] : v, r = rows[i];
+    const rowHit = q && lower[i].includes(q);
+    html += `<div class="r${i === sel ? ' sel' : rowHit ? ' hit' : ''}" data-i="${i}" style="top:${v * ROW_H}px">`;
+    for (let j = 0; j < nc; j++) {
+      const t = r[j] || '';
+      const m = rowHit && t.toLowerCase().includes(q);
+      html += `<div class="c${numeric[j] ? ' n' : ''}${j === 0 ? ' f' : ''}${m ? ' m' : ''}${j === sortCol ? ' cs' : ''}" style="width:${W[j]}px">${esc(t)}</div>`;
+    }
+    html += '</div>';
+  }
+  rowsEl.innerHTML = html;
+  rStart = s; rEnd = e;
+}
+let raf = 0;
+scroller.addEventListener('scroll', () => {
+  syncTabs();
+  if (raf) return;
+  raf = requestAnimationFrame(() => { raf = 0; renderRows(false); });
+});
+window.addEventListener('resize', () => renderRows(true));
+
+// ---- row selection ----
+rowsEl.addEventListener('click', e => {
+  const r = e.target.closest('.r'); if (!r) return;
+  const old = rowsEl.querySelector('.r.sel');
+  if (old) { old.classList.remove('sel'); if (lastQuery && lower[+old.dataset.i].includes(lastQuery)) old.classList.add('hit'); }
+  sel = +r.dataset.i; r.classList.remove('hit'); r.classList.add('sel');
+});
+
+// ---- column resizing ----
+let drag = null, lastTap = { t: 0, j: -1 };
+headEl.addEventListener('pointerdown', e => {
+  const h = e.target.closest('.rs'); if (!h) return;
+  const j = +h.dataset.j;
+  drag = { j, x: e.clientX, w: W[j], moved: false, type: e.pointerType };
+  h.setPointerCapture(e.pointerId); e.preventDefault();
+});
+headEl.addEventListener('pointermove', e => {
+  if (!drag) return;
+  if (Math.abs(e.clientX - drag.x) > 4) drag.moved = true;
+  W[drag.j] = Math.round(Math.max(CFG.MIN_COL_W, Math.min(CFG.MAX_COL_W, drag.w + e.clientX - drag.x)));
+  applyWidths();
+});
+headEl.addEventListener('pointerup', () => {
+  if (drag && !drag.moved && drag.type !== 'mouse') {       // two quick finger taps = fit to content
+    const now = Date.now();
+    if (lastTap.j === drag.j && now - lastTap.t < 400) { W[drag.j] = colWidth(drag.j, true); applyWidths(); lastTap = { t: 0, j: -1 }; }
+    else lastTap = { t: now, j: drag.j };
+  }
+  drag = null;
+});
+headEl.addEventListener('dblclick', e => {            // double-click a handle: fit to content
+  const h = e.target.closest('.rs'); if (!h) return;
+  W[+h.dataset.j] = colWidth(+h.dataset.j, true);
+  applyWidths();
+});
+function applyWidths() {
+  headEl.querySelectorAll('.hc').forEach((c, j) => { c.style.width = W[j] + 'px'; });
+  setSizes(); renderRows(true);
+}
+
+// ---- column selection + sorting ----
+// Click a column header: the whole column is highlighted and every row is sorted by it (rows stay
+// intact). Number columns: largest first. Text columns (sector, industry, ...): A-Z.
+// Click again: reverse. A third click: back to the file's own order.
+const MULT = { k: 1e3, thousand: 1e3, m: 1e6, mn: 1e6, million: 1e6, b: 1e9, bn: 1e9, billion: 1e9, t: 1e12, tn: 1e12, trillion: 1e12 };
+function numKey(raw) {
+  const s = raw.trim(); if (!s) return NaN;
+  const f = Number(s); if (Number.isFinite(f)) return f;
+  const m = NUM_RE.exec(s); if (!m) return NaN;
+  let v = parseFloat(m[1].replace(/,/g, '') + (m[2] || ''));
+  v *= MULT[(m[3] || '').toLowerCase()] || 1;
+  return (s[0] === '(' || /^-/.test(s)) ? -v : v;
+}
+const collator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true });
+function computeOrder(j, dir) {
+  const n = rows.length, idx = new Array(n);
+  for (let i = 0; i < n; i++) idx[i] = i;
+  if (numeric[j]) {
+    const key = new Float64Array(n);
+    for (let i = 0; i < n; i++) key[i] = numKey(rows[i][j] || '');
+    idx.sort((a, b) => {
+      const x = key[a], y = key[b], xn = x !== x, yn = y !== y;
+      if (xn || yn) return xn && yn ? 0 : xn ? 1 : -1;          // empty / non-numbers always last
+      return x === y ? 0 : (x < y ? -dir : dir);
+    });
+  } else {
+    const key = rows.map(r => (r[j] || '').trim());
+    idx.sort((a, b) => {
+      const x = key[a], y = key[b];
+      if (!x || !y) return !x && !y ? 0 : !x ? 1 : -1;           // empty always last
+      return collator.compare(x, y) * dir;
+    });
+  }
+  return idx;
+}
+function markHeader() {
+  headEl.querySelectorAll('.hc').forEach((c, j) => {
+    c.classList.toggle('sel', j === sortCol);
+    c.classList.toggle('asc', j === sortCol && sortDir > 0);
+  });
+}
+async function cycleSort(j) {
+  const first = numeric[j] ? -1 : 1;                              // default direction for this column
+  if (sortCol !== j) { sortCol = j; sortDir = first; }
+  else if (sortDir === first) sortDir = -first;
+  else { sortCol = -1; sortDir = 0; }
+  const big = rows.length > 50000;
+  if (big) { $('loading').style.display = 'flex'; await new Promise(r => setTimeout(r, 20)); }
+  try {
+    if (sortCol < 0) { order = null; rank = null; }
+    else {
+      order = computeOrder(sortCol, sortDir);
+      rank = new Int32Array(rows.length);
+      for (let v = 0; v < order.length; v++) rank[order[v]] = v;
+    }
+    if (matches.length) {                                         // next/previous match follows the screen order
+      matches.sort(rank ? (a, b) => rank[a] - rank[b] : (a, b) => a - b);
+      matchPos = matches.indexOf(sel);
+    }
+    refreshView(); markHeader();
+    scroller.scrollTop = 0; renderRows(true);
+    if (sortCol < 0) baseStatus();
+    else setStatus(`Sorted by ${headers[sortCol]} (${numeric[sortCol] ? (sortDir < 0 ? 'largest first' : 'smallest first') : (sortDir > 0 ? 'A–Z' : 'Z–A')})`);
+  } finally { if (big) $('loading').style.display = 'none'; }
+}
+headEl.addEventListener('click', e => {
+  if (e.target.closest('.rs')) return;                           // the resize handle is not a sort button
+  const h = e.target.closest('.hc'); if (h) cycleSort(+h.dataset.j);
+});
+function refreshView() {
+  if ($('only').checked && lastQuery && matches.length) setView(matches);   // matches are kept in screen order
+  else setView(order);                                                    // null = the file's own order
+}
+
+// ---- search ----
+function setStatus(t) { statusEl.textContent = t; }
+const VERSION = 'v2-tabs-on-scroll-up';
+function baseStatus() { setStatus(`${rows.length} rows × ${headers.length} columns · ${VERSION}`); }
+function setView(v) { view = v; N = v ? v.length : rows.length; setSizes(); }
+function showMatch(pos) {
+  matchPos = pos; const orig = matches[pos]; sel = orig;
+  let vpos;
+  refreshView();
+  vpos = ($('only').checked) ? pos : (rank ? rank[orig] : orig);
+  scroller.scrollTop = scrollFor(vpos - CFG.CONTEXT_ROWS);
+  renderRows(true);
+  setStatus(`Match ${pos + 1} of ${matches.length} (row ${orig + 1})`);
+}
+function doSearch(step) {
+  if (!headers.length) return;
+  const q = qEl.value.trim().toLowerCase();
+  if (!q) { clearSearch(); return; }
+  if (step && q === lastQuery && matches.length) { go(1); return; }
+  lastQuery = q; matches = []; matchPos = -1;
+  for (let i = 0; i < lower.length; i++) if (lower[i].includes(q)) matches.push(i);
+  if (rank) matches.sort((a, b) => rank[a] - rank[b]);
+  if (!matches.length) { setView(order); renderRows(true); setStatus('No matches'); return; }
+  showMatch(0);
+}
+function go(d) { if (matches.length) showMatch((matchPos + d + matches.length) % matches.length); }
+function clearSearch() {
+  qEl.value = ''; matches = []; matchPos = -1; lastQuery = '';
+  setView(order);
+  const at = sel >= 0 ? (rank ? rank[sel] : sel) : 0;
+  scroller.scrollTop = scrollFor(at - CFG.CONTEXT_ROWS);
+  renderRows(true);
+  if (sortCol < 0) baseStatus(); else setStatus(`Sorted by ${headers[sortCol]}`);
+}
+function openBar() {
+  if (!headers.length) return;
+  bar.classList.add('show'); qEl.focus(); qEl.select();
+}
+function closeBar() { bar.classList.remove('show'); }
+
+qEl.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); e.shiftKey ? go(-1) : doSearch(true); }
+});
+$('next').onclick = () => go(1);
+$('prev').onclick = () => go(-1);
+$('clear').onclick = clearSearch;
+$('closeBar').onclick = closeBar;
+$('only').onchange = () => { lastQuery = ''; doSearch(false); };
+fab.onclick = openBar;
+// scrolling the table by hand tucks the search bar away (like the original app)
+scroller.addEventListener('wheel', closeBar, { passive: true });
+scroller.addEventListener('touchmove', closeBar, { passive: true });
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') { e.preventDefault(); openBar(); }
+  else if (e.key === 'Escape') closeBar();
+  else if (e.key === 'F3') { e.preventDefault(); go(e.shiftKey ? -1 : 1); }
+});
+
+// ---- tabs: every open file keeps its own sorting, search and scroll position ----
+const tabsEl = $('tabs');
+function saveTab(t) {
+  Object.assign(t, { headers, rows, lower, W, numeric, compactStart, cands, sel, matches, matchPos, lastQuery,
+    sortCol, sortDir, order, rank, query: qEl.value, scrollTop: scroller.scrollTop, scrollLeft: scroller.scrollLeft });
+}
+function loadTab(t) {
+  ({ headers, rows, lower, W, numeric, compactStart, cands, sel, matches, matchPos, lastQuery, sortCol, sortDir, order, rank } = t);
+}
+function makeTab(name) {
+  return { name, headers, rows, lower, W, numeric, compactStart, cands, sel: -1, matches: [], matchPos: -1, lastQuery: '',
+    sortCol: -1, sortDir: 0, order: null, rank: null, query: '', scrollTop: 0, scrollLeft: 0 };
+}
+function statusNow() {
+  if (sortCol < 0) baseStatus();
+  else setStatus(`Sorted by ${headers[sortCol]} (${numeric[sortCol] ? (sortDir < 0 ? 'largest first' : 'smallest first') : (sortDir > 0 ? 'A–Z' : 'Z–A')})`);
+}
+function renderTabs() {
+  tabsEl.innerHTML = tabs.map((t, i) =>
+    `<div class="tab${i === cur ? ' on' : ''}" data-i="${i}" title="${esc(t.name)}"><span class="tn">${esc(t.name)}</span><i class="x" data-x="${i}" title="Close">×</i></div>`
+  ).join('') + '<button id="addTab" title="Open more CSV files">＋</button>';
+  const on = tabsEl.querySelector('.tab.on'); if (on) on.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+}
+function activate(i) {                       // show tab i (the caller has already saved the previous tab)
+  cur = i; const t = tabs[i];
+  loadTab(t);
+  buildHeader(); qEl.value = t.query || '';
+  refreshView();
+  scroller.scrollLeft = t.scrollLeft; scroller.scrollTop = t.scrollTop;
+  rStart = -1; renderRows(true); lastTop = scroller.scrollTop; syncTabs();
+  statusNow(); renderTabs();
+  document.title = t.name + ' – CSV Reader';
+}
+function switchTo(i) {
+  if (i === cur || !tabs[i]) return;
+  if (cur >= 0) saveTab(tabs[cur]);
+  activate(i);
+}
+function closeTab(i) {
+  if (tabs.length === 1) {                   // last tab: back to the start screen
+    tabs = []; cur = -1; headers = []; rows = []; lower = []; matches = []; order = rank = null; sortCol = -1; sortDir = 0;
+    N = 0; view = null; rStart = -1; headEl.innerHTML = ''; rowsEl.innerHTML = ''; qEl.value = '';
+    scroller.style.display = 'none'; fab.style.display = 'none'; document.body.classList.remove('tabs', 'th');
+    startEl.style.display = ''; closeBar(); document.title = 'CSV Reader'; return;
+  }
+  if (i === cur) { tabs.splice(i, 1); cur = -1; activate(Math.min(i, tabs.length - 1)); }
+  else { tabs.splice(i, 1); if (i < cur) cur--; renderTabs(); }
+}
+tabsEl.addEventListener('click', e => {
+  if (e.target.closest('#addTab')) { pick(); return; }
+  const x = e.target.closest('.x'); if (x) { closeTab(+x.dataset.x); return; }
+  const t = e.target.closest('.tab'); if (t) switchTo(+t.dataset.i);
+});
+// middle-click a tab to close it
+tabsEl.addEventListener('auxclick', e => { const t = e.target.closest('.tab'); if (t && e.button === 1) { e.preventDefault(); closeTab(+t.dataset.i); } });
+
+// ---- loading files ----
+const fileInput = $('file');
+if (/Android/i.test(navigator.userAgent)) fileInput.removeAttribute('accept');   // let any file be picked
+const pick = () => { fileInput.value = ''; fileInput.click(); };
+$('openBtn').onclick = pick; $('openOther').onclick = pick;
+fileInput.onchange = () => { if (fileInput.files.length) loadFiles([...fileInput.files]); };
+const startEl = $('start');
+['dragenter', 'dragover'].forEach(t => window.addEventListener(t, e => { e.preventDefault(); startEl.classList.add('drag'); }));
+['dragleave', 'drop'].forEach(t => window.addEventListener(t, e => { e.preventDefault(); startEl.classList.remove('drag'); }));
+window.addEventListener('drop', e => { const f = [...e.dataTransfer.files]; if (f.length) loadFiles(f); });
+
+function uniqueName(name) {
+  const used = new Set(tabs.map(t => t.name)); if (!used.has(name)) return name;
+  for (let n = 2; ; n++) { const c = `${name} (${n})`; if (!used.has(c)) return c; }
+}
+async function loadFiles(files) {
+  const loading = $('loading');
+  loading.style.display = 'flex';
+  const errors = []; let firstNew = -1;
+  const prevCur = cur;
+  if (cur >= 0) saveTab(tabs[cur]);               // the globals are about to be reused for the new files
+  cur = -1;
+  for (let k = 0; k < files.length; k++) {
+    const file = files[k];
+    loading.textContent = files.length > 1 ? `Loading ${k + 1} of ${files.length}…` : 'Loading…';
+    await new Promise(r => setTimeout(r, 30));    // let the message paint
+    try {
+      const t0 = performance.now();
+      const data = parseCSV(decode(await file.arrayBuffer()));
+      if (!data.length) throw new Error('the file is empty');
+      headers = data[0].map(h => h.trim()); rows = data.slice(1);
+      lower = rows.map(r => r.join('\u0000').toLowerCase());
+      sel = -1; matches = []; matchPos = -1; lastQuery = ''; sortCol = -1; sortDir = 0; order = null; rank = null;
+      analyse();
+      tabs.push(makeTab(uniqueName(file.name)));
+      if (firstNew < 0) firstNew = tabs.length - 1;
+      console.log(`Loaded ${file.name}: ${rows.length} rows x ${headers.length} cols in ${(performance.now() - t0).toFixed(0)} ms`);
+    } catch (err) { errors.push(`${file.name}: ${err.message}`); }
+  }
+  loading.style.display = 'none'; loading.textContent = 'Loading…';
+  if (firstNew >= 0) {
+    startEl.style.display = 'none'; scroller.style.display = 'block'; fab.style.display = 'block';
+    document.body.classList.add('tabs');
+    closeBar(); activate(firstNew);
+  } else if (tabs.length) {
+    activate(Math.max(0, prevCur));                 // nothing new could be opened: go back to the previous tab
+  }
+  if (errors.length) alert('Could not open:\n' + errors.join('\n'));
+}
+if ('serviceWorker' in navigator && location.protocol === 'https:' && location.hostname !== 'localhost') {
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+}
+})();
+</script>
+</body>
+</html>

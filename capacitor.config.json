@@ -1,0 +1,7 @@
+{
+  "appId": "com.csvreader.app",
+  "appName": "CSV Reader",
+  "webDir": "www",
+  "backgroundColor": "#181818",
+  "android": { "allowMixedContent": false }
+}
