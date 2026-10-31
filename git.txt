@@ -1,6 +1,26 @@
+Reliable way is to Git.
+
+Delete drjungle/CSV-Reader:
+1. In drjungle/CSV-Reader, Settings
+2. Scroll to the bottom down and select 'Delete this repository'
+3. In drjungle/CSV-Reader, please enter drjungle/CSV-Reader
+4. Mobile GitHub, enter two digits
+
+Create an empty repository (CSV-Reader) under drjungle
+Goto 'https://github.com/drjungle?tab=repositories'
+Click green button 'New'
+And add empty repository 'CSV-Reader'
+And click 'Create repository'
+
+And then run the command:
 git init
 git add .
 git commit -m "CSV Reader"
 git branch -M main
 git remote add origin https://github.com/drjungle/CSV-Reader.git
 git push -u origin main
+
+After all build are done, press the 'Actions' button.
+Now click CSV-Reader, all the bottom of the screen.
+At the Artifacts, you'll see the 'csv-reader.apk'.
+Download it will be csv-reader.zip file will be created at the Download folder.
