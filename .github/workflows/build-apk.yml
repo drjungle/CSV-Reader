@@ -21,7 +21,7 @@ jobs:
 
       - name: Install web dependencies and copy the page into the Android project
         run: |
-          npm ci
+          npm install
           npx cap sync android
 
       - name: Build debug APK
