@@ -402,7 +402,8 @@ async function saveSelected() {
   const base = (tabs[cur] ? tabs[cur].name : 'data').replace(/\.csv$/i, '');
   let name = `${base}_selected.csv`;
   // Desktop Chrome / Edge: a real "Save as" dialog - pick a new name, or pick an existing file to overwrite it
-  if (window.showSaveFilePicker) {
+  const isNative = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+  if (window.showSaveFilePicker && !isNative) {   // desktop only: inside the APK this picker can hang forever
     try {
       const h = await window.showSaveFilePicker({ suggestedName: name, types: [{ description: 'CSV file', accept: { 'text/csv': ['.csv'] } }] });
       const w = await h.createWritable(); await w.write(new Blob([text], { type: 'text/csv' })); await w.close();
