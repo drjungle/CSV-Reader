@@ -393,8 +393,6 @@ function askSaveDialog(defName, csvText) {
 async function saveSelected() {
   const idx = selectedIdx(); if (!idx.length) return;
   setStatus('Preparing save…');
-  // TEMPORARY DEBUG (remove once saving works): proves this file version is the one running in the APK
-  try { const c = window.Capacitor; alert('Save debug v4\nnative=' + !!(c && c.isNativePlatform && c.isNativePlatform()) + '\nplugins=' + (c && c.Plugins ? Object.keys(c.Plugins).join(',') : 'none')); } catch (e) { alert('Save debug v4 error: ' + e); }
   // ALL rows, in the file's own order. A CSV cannot store colours, so the selected rows are flagged
   // in an extra last column "__selected"; this reader turns the flag back into the highlight when the file is opened.
   const chosen = new Set(idx);
