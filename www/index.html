@@ -105,6 +105,9 @@
   #bar label { color: #ccc; font-size: 12px; white-space: nowrap; display: flex; align-items: center; gap: 4px; }
   #fab { position: fixed; right: calc(18px + env(safe-area-inset-right)); bottom: calc(18px + env(safe-area-inset-bottom)); z-index: 15; width: 52px; height: 52px; border-radius: 50%;
     border: 0; background: #1f7a4d; color: #fff; font-size: 22px; box-shadow: 0 2px 10px rgba(0,0,0,.6); display: none; }
+  #saveFab { position: fixed; right: calc(18px + env(safe-area-inset-right)); bottom: calc(80px + env(safe-area-inset-bottom)); z-index: 15;
+    height: 44px; padding: 0 16px; border-radius: 22px; border: 0; background: #3b6fd4; color: #fff; font-size: 14px;
+    box-shadow: 0 2px 10px rgba(0,0,0,.6); display: none; }
   #loading { position: fixed; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center;
     background: rgba(24,24,24,.85); color: #bbb; font-size: 16px; }
   /* ---- phone ---- */
@@ -139,6 +142,7 @@
   <button id="closeBar" title="Hide (Esc)">–</button>
 </div>
 <button id="fab" title="Search (Ctrl+F)">🔍</button>
+<button id="saveFab" title="Save the selected rows as a CSV file">💾 Save</button>
 <div id="loading">Loading…</div>
 <input type="file" id="file" accept=".csv,text/csv,text/plain" multiple hidden>
 
@@ -342,7 +346,85 @@ function renderRows(force) {
   }
   rowsEl.innerHTML = html;
   rStart = s; rEnd = e;
+  updateSaveBtn();
 }
+
+// ---- save selected rows as a CSV file ----
+const saveFab = $('saveFab');
+function selectedIdx() {
+  const s = new Set(selSet); if (sel >= 0) s.add(sel);
+  const a = [...s];
+  a.sort(rank ? (x, y) => rank[x] - rank[y] : (x, y) => x - y);   // same order as on screen
+  return a;
+}
+function updateSaveBtn() {
+  const n = headers.length ? selectedIdx().length : 0;
+  saveFab.style.display = n ? 'block' : 'none';
+  if (n) saveFab.textContent = `💾 Save ${n} row${n > 1 ? 's' : ''}`;
+}
+const csvField = s => /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+// In-page "save as" dialog (works inside WebView/APK, where prompt() does nothing).
+// Resolves to the typed file name, or null if cancelled. "Copy CSV" is a fallback if the app blocks downloads/sharing.
+function askSaveDialog(defName, csvText) {
+  return new Promise(resolve => {
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;padding:16px';
+    ov.innerHTML = '<div style="background:#262626;border-radius:10px;padding:16px;width:100%;max-width:420px;box-shadow:0 4px 24px rgba(0,0,0,.7)">' +
+      '<div style="margin-bottom:8px">Save the selected rows as (file name):</div>' +
+      '<input id="svName" type="text" autocomplete="off" style="width:100%;padding:9px 8px;background:#1a1a1a;color:#f0f0f0;border:1px solid #555;border-radius:4px;font:inherit;font-size:16px">' +
+      '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;flex-wrap:wrap">' +
+      '<button id="svCopy" style="background:#333;color:#ddd;border:0;border-radius:4px;padding:10px 14px">Copy CSV</button>' +
+      '<button id="svCancel" style="background:#333;color:#ddd;border:0;border-radius:4px;padding:10px 14px">Cancel</button>' +
+      '<button id="svOk" style="background:#3b6fd4;color:#fff;border:0;border-radius:4px;padding:10px 18px">Save</button></div></div>';
+    document.body.appendChild(ov);
+    const inp = ov.querySelector('#svName'); inp.value = defName;
+    const done = v => { ov.remove(); resolve(v); };
+    ov.querySelector('#svOk').onclick = () => done(inp.value);
+    ov.querySelector('#svCancel').onclick = () => done(null);
+    ov.querySelector('#svCopy').onclick = async () => {
+      try { await navigator.clipboard.writeText(csvText); setStatus('CSV copied to the clipboard'); done(null); }
+      catch { const ta = document.createElement('textarea'); ta.value = csvText; document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); setStatus('CSV copied to the clipboard'); } catch {} ta.remove(); done(null); }
+    };
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); done(inp.value); } else if (e.key === 'Escape') done(null); });
+    inp.focus(); inp.select();
+  });
+}
+async function saveSelected() {
+  const idx = selectedIdx(); if (!idx.length) return;
+  // ALL rows, in the file's own order. A CSV cannot store colours, so the selected rows are flagged
+  // in an extra last column "__selected"; this reader turns the flag back into the highlight when the file is opened.
+  const chosen = new Set(idx);
+  const lines = [headers.concat('__selected').map(csvField).join(',')];
+  for (let i = 0; i < rows.length; i++) lines.push(headers.map((_, j) => csvField(rows[i][j] || '')).concat(chosen.has(i) ? '1' : '').join(','));
+  const text = '\uFEFF' + lines.join('\r\n') + '\r\n';          // BOM so Excel reads UTF-8 correctly
+  const base = (tabs[cur] ? tabs[cur].name : 'data').replace(/\.csv$/i, '');
+  let name = `${base}_selected.csv`;
+  // Desktop Chrome / Edge: a real "Save as" dialog - pick a new name, or pick an existing file to overwrite it
+  if (window.showSaveFilePicker) {
+    try {
+      const h = await window.showSaveFilePicker({ suggestedName: name, types: [{ description: 'CSV file', accept: { 'text/csv': ['.csv'] } }] });
+      const w = await h.createWritable(); await w.write(new Blob([text], { type: 'text/csv' })); await w.close();
+      setStatus(`Saved ${idx.length} rows to ${h.name}`); return;
+    } catch (err) { if (err && err.name === 'AbortError') return; }   // other errors: fall back below
+  }
+  // Phones / other browsers: ask for the file name first
+  // (prompt() is not used: Android WebView / APK wrappers return null for it, so the button seemed dead)
+  const typed = await askSaveDialog(name, text);
+  if (typed === null) return;
+  name = typed.trim() || name;
+  if (!/\.csv$/i.test(name)) name += '.csv';
+  const file = new File([text], name, { type: 'text/csv' });
+  if (matchMedia('(pointer:coarse)').matches && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: name }); return; }
+    catch (err) { if (err && err.name === 'AbortError') return; }   // otherwise fall back to a normal download
+  }
+  const url = URL.createObjectURL(file);
+  const a = document.createElement('a'); a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+saveFab.onclick = saveSelected;
 let raf = 0;
 scroller.addEventListener('scroll', () => {
   syncTabs();
@@ -361,6 +443,7 @@ rowsEl.addEventListener('click', e => {
   const on = selSet.has(i) || sel === i;
   r.classList.toggle('sel', on);
   r.classList.toggle('hit', !on && !!lastQuery && lower[i].includes(lastQuery));
+  updateSaveBtn();
 });
 
 // ---- column resizing ----
@@ -569,7 +652,7 @@ function closeTab(i) {
     tabs = []; cur = -1; headers = []; rows = []; lower = []; matches = []; selSet = new Set(); sel = -1; order = rank = null; sortCol = -1; sortDir = 0;
     N = 0; view = null; rStart = -1; headEl.innerHTML = ''; rowsEl.innerHTML = ''; qEl.value = '';
     scroller.style.display = 'none'; fab.style.display = 'none'; document.body.classList.remove('tabs', 'th');
-    startEl.style.display = ''; closeBar(); document.title = 'CSV Reader'; return;
+    startEl.style.display = ''; closeBar(); document.title = 'CSV Reader'; updateSaveBtn(); return;
   }
   if (i === cur) { tabs.splice(i, 1); cur = -1; activate(Math.min(i, tabs.length - 1)); }
   else { tabs.splice(i, 1); if (i < cur) cur--; renderTabs(); }
@@ -666,10 +749,17 @@ async function loadFiles(files) {
       const data = parseCSV(decode(await file.arrayBuffer()));
       if (!data.length) throw new Error('the file is empty');
       headers = data[0].map(h => h.trim()); rows = data.slice(1);
+      const pre = new Set();                          // rows flagged as selected by an earlier save
+      const mk = headers.length - 1;
+      if (mk > 0 && headers[mk] === '__selected') {
+        rows.forEach((r, i) => { if ((r[mk] || '').trim() === '1') pre.add(i); });
+        headers = headers.slice(0, mk); rows = rows.map(r => r.slice(0, mk));
+      }
       lower = rows.map(r => r.join('\u0000').toLowerCase());
       sel = -1; matches = []; matchPos = -1; lastQuery = ''; sortCol = -1; sortDir = 0; order = null; rank = null;
       analyse();
       tabs.push(makeTab(uniqueName(file.name)));
+      tabs[tabs.length - 1].selSet = pre;
       if (firstNew < 0) firstNew = tabs.length - 1;
       console.log(`Loaded ${file.name}: ${rows.length} rows x ${headers.length} cols in ${(performance.now() - t0).toFixed(0)} ms`);
     } catch (err) { errors.push(`${file.name}: ${err.message}`); }
